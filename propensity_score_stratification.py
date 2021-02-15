@@ -5,7 +5,7 @@ from tqdm import tqdm
 from sklearn.preprocessing import normalize, KBinsDiscretizer
 
 class PropensityScoreStratification(object):
-	def __init__(self,num_classes=None,normalize='l2',num_strata=5,clipping_threshold=10):
+	def __init__(self,num_classes=None,normalize='l2',num_strata=5,clipping_threshold=10,verbose=False):
 		'''
 			num_classes
 				- Number of classes for classification (>= 2)
@@ -24,6 +24,20 @@ class PropensityScoreStratification(object):
 		assert normalize in [None,'l1','l2','max'], 'normalize must be a string (l1, l2, max) or None (no normalization)'
 		assert int(num_strata) >= 2, 'num_strata must be an integer >= 2 (default 5)'
 		assert int(clipping_threshold) >= 2, 'clipping_threshold must be an integer >= 2 (default 10)'
+
+		self.num_classes = num_classes
+		self.normalize = normalize
+		self.num_strata = num_strata
+		self.clipping_threshold = clipping_threshold
+		self.verbose = verbose
+
+	def print(self,message,verbose_only=True):
+		'''
+			verbose_only
+				- Only print if self.verbose == True (default True)
+		'''
+		if (not verbose_only) or (verbose_only and self.verbose):
+			print(message)
 
 	def estimate_causality(self, data_df, adjacency_matrix_df, y, X_features=None):
 		''' 
@@ -50,4 +64,3 @@ class PropensityScoreStratification(object):
 		elif type(X_features) is str:
 			X_features = [X_features]
 
-		
