@@ -71,7 +71,7 @@ class PropensityScoreStratification(object):
 				- If type(X_features) is string, estimate causal effect of a single X_feature on y,
 					where X_feature in data_df.columns
 		'''
-		assert data_df.columns == adjacency_matrix_df.columns and data_df.columns == adjacency_matrix_df.index, '\
+		assert set(data_df.columns) == set(adjacency_matrix_df.columns) and set(data_df.columns) == set(adjacency_matrix_df.index), '\
 				adjacency_matrix_df must be a Dataframe with indices/columns that reflect the data_df columns'
 		assert X_features is None or type(X_features) is list or type(X_features) is str, '\
 				X_features must be None, a list of X_features to evaluate, or a single X_feature (str)'
@@ -117,7 +117,7 @@ class PropensityScoreStratification(object):
 				tqdm_features.set_description(feat)
 
 			# Identify common causes (C such that C->feat and C->y)
-			common_causes = adjacency_matrix_df.loc[adjacency_matrix_df[feat!=0] & adjacency_matrix_df[y!=0]].index
+			common_causes = adjacency_matrix_df.loc[(adjacency_matrix_df[[feat,y]]!=0).all(axis=1)].index
 			if len(common_causes) == 0:
 				causal_df.loc[feat,y] = np.nan
 				self.print('No common causes between %s and %s, therefore cannot do propensity score stratification' % (feat,y))
@@ -142,7 +142,7 @@ class PropensityScoreStratification(object):
 				tmp_df = strata_df.loc[strata_df['strata']==strata]
 				samples = tmp_df.index
 
-				if len(tmp_df) < clipping_threshold or len(set(tmp_df['treatment'])) < 2:
+				if len(tmp_df) < self.clipping_threshold or len(set(tmp_df['treatment'])) < 2:
 					strata_df.loc[samples,'effect'] = np.nan
 					continue
 				model = LinearRegression()
