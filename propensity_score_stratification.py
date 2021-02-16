@@ -5,12 +5,12 @@ from tqdm import tqdm
 from sklearn.preprocessing import normalize, KBinsDiscretizer
 
 class PropensityScoreStratification(object):
-	def __init__(self,num_classes=None,normalize='l2',num_strata=5,clipping_threshold=10,verbose=False):
+	def __init__(self,num_classes=None,norm='l2',num_strata=5,clipping_threshold=10,verbose=False):
 		'''
 			num_classes
 				- Number of classes for classification (>= 2)
 				- If None, a regression model will be assumed
-			normalize
+			norm
 				- Type of normalization (L1, L2, Max)
 				- If None, no normalization will be applied prior to quantifying causal effects
 			num_strata
@@ -21,12 +21,12 @@ class PropensityScoreStratification(object):
 				- Must be >= 2
 		'''
 		assert num_classes is None or int(num_classes) >= 2, 'num_classes must be None (regression) or an integer >= 2'
-		assert normalize in [None,'l1','l2','max'], 'normalize must be a string (l1, l2, max) or None (no normalization)'
+		assert norm in [None,'l1','l2','max'], 'norm must be a string (l1, l2, max) or None (no normalization)'
 		assert int(num_strata) >= 2, 'num_strata must be an integer >= 2 (default 5)'
 		assert int(clipping_threshold) >= 2, 'clipping_threshold must be an integer >= 2 (default 10)'
 
 		self.num_classes = num_classes
-		self.normalize = normalize
+		self.norm = norm
 		self.num_strata = num_strata
 		self.clipping_threshold = clipping_threshold
 		self.verbose = verbose
@@ -59,8 +59,21 @@ class PropensityScoreStratification(object):
 				adjacency_matrix_df must be a Dataframe with indices/columns that reflect the data_df columns'
 		assert X_features is None or type(X_features) is list or type(X_features) is str, '\
 				X_features must be None, a list of X_features to evaluate, or a single X_feature (str)'
+		assert y in data_df.columns, 'Feature %s not in data_df.columns' % y
+		
 		if X_features is None:
 			X_features = [col for col in data_df.columns if col != y]
 		elif type(X_features) is str:
+			assert X_features in data_df.columns, 'Feature %s is not in data_df.columns' % X_features
+			assert X_features != y, 'Cannot find causal effect of feature %s on itself' % y
 			X_features = [X_features]
+		elif type(X_features) is list:
+			assert all([feat in data_df.columns for feat in X_features]), 'X_features must all be in data_df.columns'
+			assert y not in X_features, 'Cannot find causal effect of feature %s on itself' % y
 
+		# Normalize X_features to compare
+		all_X_features = [col for col in data_df.columns if col != y]
+		if self.norm is not None:
+			data_df[all_X_features].iloc[:,:] = normalize(data_df[all_X_features].values,axis=0,norm=self.norm)
+
+		
