@@ -1,8 +1,12 @@
 import pandas as pd
 import numpy as np
-import networkx as nx
 from tqdm import tqdm
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.preprocessing import normalize, KBinsDiscretizer
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+warnings.filterwarnings('ignore',category=UserWarning)
+warnings.filterwarnings('ignore',category=ConvergenceWarning)
 
 class PropensityScoreStratification(object):
 	def __init__(self,num_classes=None,norm='l2',num_strata=5,clipping_threshold=10,verbose=False):
@@ -71,9 +75,15 @@ class PropensityScoreStratification(object):
 			assert all([feat in data_df.columns for feat in X_features]), 'X_features must all be in data_df.columns'
 			assert y not in X_features, 'Cannot find causal effect of feature %s on itself' % y
 
-		# Normalize X_features to compare
+		# Normalize all_X_features to compare
 		all_X_features = [col for col in data_df.columns if col != y]
 		if self.norm is not None:
 			data_df[all_X_features].iloc[:,:] = normalize(data_df[all_X_features].values,axis=0,norm=self.norm)
 
-		
+		# Discretize each of all_X_features using kmeans
+		#	- Necessary for stratification via logistic regression
+		for feat in all_X_features:
+			n_bins = min(self.num_strata,len(set(df[feat])))
+			le = KBinsDiscretizer(n_bins=n_bins,encode='ordinal',strategy='kmeans')
+			data_df[feat] = le.fit_transform(df[feat].values.reshape(-1,1))
+
