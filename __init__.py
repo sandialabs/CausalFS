@@ -1,1 +1,1 @@
-from .propensity_score_stratification import *
+from .propensity_score_stratification import PropensityScoreStratification
