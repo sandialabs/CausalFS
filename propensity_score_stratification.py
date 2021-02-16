@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-from scipy.stats import kendalltau
 from sklearn.linear_model import LinearRegression, LogisticRegression
+from skleanr.metrics import r2_score
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize, KBinsDiscretizer
 import warnings
@@ -44,6 +44,7 @@ class PropensityScoreStratification(object):
 		self.norm = norm
 		self.num_strata = num_strata
 		self.clipping_threshold = clipping_threshold
+		self.weighted_average = weighted_average
 		self.verbose = verbose
 
 	def print(self,message,verbose_only=True):
@@ -88,7 +89,7 @@ class PropensityScoreStratification(object):
 
 
 		# Normalize all_X_features to compare features of different scales
-		self.print('Normalizing samples in data_df to compare features of different scale.',verbose_only=True)
+		self.print('Normalizing samples in data_df to compare features of different scale.')
 
 		all_X_features = [col for col in data_df.columns if col != y]
 		if self.norm is not None:
@@ -97,7 +98,7 @@ class PropensityScoreStratification(object):
 
 		# Discretize each of all_X_features using kmeans
 		#	- Necessary for stratification via logistic regression
-		self.print('Discretizing each feature for stratification via logistic regression',verbose_only=True)
+		self.print('Discretizing each feature for stratification via logistic regression')
 
 		bin_df = data_df.copy()
 		for feat in all_X_features:
@@ -107,9 +108,9 @@ class PropensityScoreStratification(object):
 
 
 		# Iterate through X_features and estimate effect of (X_feature->y)
-		self.print('Iterating through X_features to estimate effect (X_feature->y)',verbose_only=True)
+		self.print('Iterating through X_features to estimate effect (X_feature->y)')
 
-		causal_df = adjacency_matrix_df.copy()
+		causal_df = pd.DataFrame(0,index=all_X_features,columns=[y])
 		tqdm_features = tqdm(all_X_features)
 		for feat in tqdm_features if self.verbose else all_X_features:
 			if self.verbose:
@@ -118,12 +119,12 @@ class PropensityScoreStratification(object):
 			# Identify common causes (C such that C->feat and C->y)
 			common_causes = adjacency_matrix_df.loc[adjacency_matrix_df[feat!=0] & adjacency_matrix_df[y!=0]].index
 			if len(common_causes) == 0:
-				causal_df.loc[feat,y] = None
+				causal_df.loc[feat,y] = np.nan
 				self.print('No common causes between %s and %s, therefore cannot do propensity score stratification' % (feat,y))
 				continue
 
 			# Stratify samples
-			strata_df = pd.DataFrame(index=data_df.index,columns=['treatment','propensity_score','strata','effect'])
+			strata_df = pd.DataFrame(index=data_df.index,columns=['treatment','propensity_score','strata','effect','r2'])
 			strata_df['treatment'] = data_df[feat]
 
 			propensity_score_model = LogisticRegression(solver='lbfgs',multi_class='auto',max_iter=500)
@@ -133,5 +134,39 @@ class PropensityScoreStratification(object):
 			for i in range(len(strata_df)):
 				treatment = bin_df.loc[strata_df.index[i],feat]
 				strata_df.loc[strata_df.index[i],'propensity_score'] = propensity_scores[i,int(treatment-1)]
-			kmeans = KMeans(n_clusters=num_strata).fit(propensity_scores)
+			kmeans = KMeans(n_clusters=self.num_strata).fit(propensity_scores)
 			strata_df['strata'] = kmeans.predict(propensity_scores)
+
+			# Estimate dy/dx ~y = f(x) for each strata if there are sufficient # of samples
+			for strata in sorted(set(strata_df['strata'])):
+				tmp_df = strata_df.loc[strata_df['strata']==strata]
+				samples = tmp_df.index
+
+				if len(tmp_df) < clipping_threshold or len(set(tmp_df['treatment'])) < 2:
+					strata_df.loc[samples,'effect'] = np.nan
+					continue
+				model = LinearRegression()
+				tmpX = data_df.loc[samples,feat].values.reshape(-1,1)
+				tmpy = data_df.loc[samples,y]
+				model.fit(tmpX,tmpy)
+				strata_df.loc[samples,'effect'] = model.coef_[0]
+				strata_df.loc[samples,'r2'] = r2_score(tmpy,model.predict(tmpX))
+
+			# Record average effect in causal_df
+			strata_df = strata_df.dropna()
+			if len(strata_df)==0 or len(set(strata_df['treatment']))==1:
+				self.print('No valid strata for %s->%s' % (feat,y))
+				causal_df.loc[feat,y] = np.nan
+			else:
+				if self.weighted_average:
+					# Remove invalid R2
+					strata_df.loc[strata_df['r2']<0,'r2'] = 0
+					strata_df.loc[strata_df['r2']>1,'r2'] = 0
+					wavg = (strata_df['effect'] * strata_df['r2']).sum() / strata_df['r2'].sum()
+					causal_df.loc[feat,y] = wavg
+					causal_df.loc[feat,'%s_R2' % y] = strata_df['r2'].mean()
+					causal_df.loc[feat,'%s_NumValidSamples' % y] = len(strata_df)
+				else:
+					causal_df.loc[feat,y] = strata_df['effect'].mean()
+
+			return causal_df
