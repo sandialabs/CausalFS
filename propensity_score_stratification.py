@@ -1,7 +1,9 @@
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+from scipy.stats import kendalltau
 from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize, KBinsDiscretizer
 import warnings
 from sklearn.exceptions import ConvergenceWarning
@@ -9,7 +11,9 @@ warnings.filterwarnings('ignore',category=UserWarning)
 warnings.filterwarnings('ignore',category=ConvergenceWarning)
 
 class PropensityScoreStratification(object):
-	def __init__(self,num_classes=None,norm='l2',num_strata=5,clipping_threshold=10,verbose=False):
+	def __init__(self,num_classes=None,norm='l2',num_strata=5,
+					clipping_threshold=10,weighted_average=True,
+					verbose=False):
 		'''
 			num_classes
 				- Number of classes for classification (>= 2)
@@ -23,6 +27,13 @@ class PropensityScoreStratification(object):
 				- Minimum number of samples for any given stratum to be considered
 					- (strata with < clipping_threshold samples will not be considered in causal quantification)
 				- Must be >= 2
+
+			Propensity score stratification determines causal impact (x->y) by first grouping samples by
+				P(x|common_causes)
+			where common_causes is the set of {C s.t C->x and C->y}. The causal impact is determined to be
+				dy/dx ~y = f(x)
+			the average linear regression for each strata. If weighted_average is True, the average for each
+			strata will be weighted based on the R2 between x and ~y.
 		'''
 		assert num_classes is None or int(num_classes) >= 2, 'num_classes must be None (regression) or an integer >= 2'
 		assert norm in [None,'l1','l2','max'], 'norm must be a string (l1, l2, max) or None (no normalization)'
@@ -41,7 +52,7 @@ class PropensityScoreStratification(object):
 				- Only print if self.verbose == True (default True)
 		'''
 		if (not verbose_only) or (verbose_only and self.verbose):
-			print(message)
+			tqdm.write(str(message))
 
 	def estimate_causality(self, data_df, adjacency_matrix_df, y, X_features=None):
 		''' 
@@ -50,7 +61,7 @@ class PropensityScoreStratification(object):
 				- Contains both X and y, where "y" is the quantity/classification to be predicted.
 			adjacency_matrix_df
 				- A pandas Dataframe with indices/columns == data_df.columns.
-				- Individual values are 0/1 depending on potential causal relationships s.t. index -> column
+				- Individual values are 0/1 depending on potential causal relationships s.t. index->column
 			y
 				- The variable to be predicted
 			X_features (optional)
@@ -64,7 +75,7 @@ class PropensityScoreStratification(object):
 		assert X_features is None or type(X_features) is list or type(X_features) is str, '\
 				X_features must be None, a list of X_features to evaluate, or a single X_feature (str)'
 		assert y in data_df.columns, 'Feature %s not in data_df.columns' % y
-		
+
 		if X_features is None:
 			X_features = [col for col in data_df.columns if col != y]
 		elif type(X_features) is str:
@@ -75,16 +86,52 @@ class PropensityScoreStratification(object):
 			assert all([feat in data_df.columns for feat in X_features]), 'X_features must all be in data_df.columns'
 			assert y not in X_features, 'Cannot find causal effect of feature %s on itself' % y
 
-		# Normalize all_X_features to compare
+
+		# Normalize all_X_features to compare features of different scales
+		self.print('Normalizing samples in data_df to compare features of different scale.',verbose_only=True)
+
 		all_X_features = [col for col in data_df.columns if col != y]
 		if self.norm is not None:
 			data_df[all_X_features].iloc[:,:] = normalize(data_df[all_X_features].values,axis=0,norm=self.norm)
 
+
 		# Discretize each of all_X_features using kmeans
 		#	- Necessary for stratification via logistic regression
+		self.print('Discretizing each feature for stratification via logistic regression',verbose_only=True)
+
 		bin_df = data_df.copy()
 		for feat in all_X_features:
 			n_bins = min(self.num_strata,len(set(data_df[feat])))
 			le = KBinsDiscretizer(n_bins=n_bins,encode='ordinal',strategy='kmeans')
 			bin_df[feat] = le.fit_transform(data_df[feat].values.reshape(-1,1))
 
+
+		# Iterate through X_features and estimate effect of (X_feature->y)
+		self.print('Iterating through X_features to estimate effect (X_feature->y)',verbose_only=True)
+
+		causal_df = adjacency_matrix_df.copy()
+		tqdm_features = tqdm(all_X_features)
+		for feat in tqdm_features if self.verbose else all_X_features:
+			if self.verbose:
+				tqdm_features.set_description(feat)
+
+			# Identify common causes (C such that C->feat and C->y)
+			common_causes = adjacency_matrix_df.loc[adjacency_matrix_df[feat!=0] & adjacency_matrix_df[y!=0]].index
+			if len(common_causes) == 0:
+				causal_df.loc[feat,y] = None
+				self.print('No common causes between %s and %s, therefore cannot do propensity score stratification' % (feat,y))
+				continue
+
+			# Stratify samples
+			strata_df = pd.DataFrame(index=data_df.index,columns=['treatment','propensity_score','strata','effect'])
+			strata_df['treatment'] = data_df[feat]
+
+			propensity_score_model = LogisticRegression(solver='lbfgs',multi_class='auto',max_iter=500)
+			propensity_score_model.fit(bin_df[common_causes], bin_df[feat])
+			propensity_scores = propensity_score_model.predict_proba(bin_df[common_causes])
+
+			for i in range(len(strata_df)):
+				treatment = bin_df.loc[strata_df.index[i],feat]
+				strata_df.loc[strata_df.index[i],'propensity_score'] = propensity_scores[i,int(treatment-1)]
+			kmeans = KMeans(n_clusters=num_strata).fit(propensity_scores)
+			strata_df['strata'] = kmeans.predict(propensity_scores)
