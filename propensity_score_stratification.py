@@ -82,8 +82,9 @@ class PropensityScoreStratification(object):
 
 		# Discretize each of all_X_features using kmeans
 		#	- Necessary for stratification via logistic regression
+		bin_df = data_df.copy()
 		for feat in all_X_features:
-			n_bins = min(self.num_strata,len(set(df[feat])))
+			n_bins = min(self.num_strata,len(set(data_df[feat])))
 			le = KBinsDiscretizer(n_bins=n_bins,encode='ordinal',strategy='kmeans')
-			data_df[feat] = le.fit_transform(df[feat].values.reshape(-1,1))
+			bin_df[feat] = le.fit_transform(data_df[feat].values.reshape(-1,1))
 
