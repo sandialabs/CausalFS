@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from skleanr.metrics import r2_score
+from sklearn.metrics import r2_score
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize, KBinsDiscretizer
 import warnings
