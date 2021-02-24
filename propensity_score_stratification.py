@@ -87,24 +87,31 @@ class PropensityScoreStratification(object):
 			assert all([feat in data_df.columns for feat in X_features]), 'X_features must all be in data_df.columns'
 			assert y not in X_features, 'Cannot find causal effect of feature %s on itself' % y
 
+		# If non-ordinal data, normalization and discretization are required
+		all_X_features = [col for col in data_df.columns if col != y]
+		if any([len(set(data_df[xfeat]))>2 for xfeat in all_X_features]):
+			ordinal = False
+		else:
+			ordinal = True
 
 		# Normalize all_X_features to compare features of different scales
-		self.print('Normalizing samples in data_df to compare features of different scale.')
-
-		all_X_features = [col for col in data_df.columns if col != y]
-		if self.norm is not None:
-			data_df[all_X_features].iloc[:,:] = normalize(data_df[all_X_features].values,axis=0,norm=self.norm)
+		if not ordinal:
+			self.print('Normalizing samples in data_df to compare features of different scale.')
+			if self.norm is not None:
+				data_df[all_X_features].iloc[:,:] = normalize(data_df[all_X_features].values,axis=0,norm=self.norm)
 
 
 		# Discretize each of all_X_features using kmeans
 		#	- Necessary for stratification via logistic regression
-		self.print('Discretizing each feature for stratification via logistic regression')
-
-		bin_df = data_df.copy()
-		for feat in all_X_features:
-			n_bins = min(self.num_strata,len(set(data_df[feat])))
-			le = KBinsDiscretizer(n_bins=n_bins,encode='ordinal',strategy='kmeans')
-			bin_df[feat] = le.fit_transform(data_df[feat].values.reshape(-1,1))
+		if not ordinal:
+			self.print('Discretizing each feature for stratification via logistic regression')
+			bin_df = data_df.copy()
+			for feat in all_X_features:
+				n_bins = min(self.num_strata,len(set(data_df[feat])))
+				le = KBinsDiscretizer(n_bins=n_bins,encode='ordinal',strategy='kmeans')
+				bin_df[feat] = le.fit_transform(data_df[feat].values.reshape(-1,1))
+		else:
+			bin_df = data_df
 
 
 		# Iterate through X_features and estimate effect of (X_feature->y)
