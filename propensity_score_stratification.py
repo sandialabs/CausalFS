@@ -144,46 +144,50 @@ class PropensityScoreStratification(object):
 			kmeans = KMeans(n_clusters=self.num_strata).fit(propensity_scores)
 			strata_df['strata'] = kmeans.predict(propensity_scores)
 
+			# REGRESSION:
 			# Estimate dy/dx ~y = f(x) for each strata if there are sufficient # of samples
-			for strata in sorted(set(strata_df['strata'])):
-				tmp_df = strata_df.loc[strata_df['strata']==strata]
-				samples = tmp_df.index
+			if self.num_classes is None:
+				for strata in sorted(set(strata_df['strata'])):
+					tmp_df = strata_df.loc[strata_df['strata']==strata]
+					samples = tmp_df.index
 
-				if len(tmp_df) < self.clipping_threshold or len(set(tmp_df['treatment'])) < 2:
-					strata_df.loc[samples,'effect'] = np.nan
-					continue
-				model = LinearRegression()
-				tmpX = data_df.loc[samples,feat].values.reshape(-1,1)
-				tmpy = data_df.loc[samples,y]
-				model.fit(tmpX,tmpy)
-				strata_df.loc[samples,'effect'] = model.coef_[0]
-				strata_df.loc[samples,'r2'] = r2_score(tmpy,model.predict(tmpX))
+					if len(tmp_df) < self.clipping_threshold or len(set(tmp_df['treatment'])) < 2:
+						strata_df.loc[samples,'effect'] = np.nan
+						continue
+					model = LinearRegression()
+					tmpX = data_df.loc[samples,feat].values.reshape(-1,1)
+					tmpy = data_df.loc[samples,y]
+					model.fit(tmpX,tmpy)
+					strata_df.loc[samples,'effect'] = model.coef_[0]
+					strata_df.loc[samples,'r2'] = r2_score(tmpy,model.predict(tmpX))
 
-			# Record average effect in causal_df
-			strata_df.loc[strata_df['r2']<0,'r2'] = np.nan
-			strata_df.loc[strata_df['r2']>1,'r2'] = np.nan
-			strata_df = strata_df.dropna()
-			if len(strata_df)==0 or len(set(strata_df['treatment']))==1:
-				self.print('No valid strata for %s->%s' % (feat,y))
-				causal_df.loc[feat,y] = np.nan
-			elif (strata_df['treatment']!=0).sum() < self.clipping_threshold:
-				self.print('Not enough positive samples for %s' % feat)
-				causal_df.loc[feat,y] = np.nan
-			else:
-				if self.weighted_average:
-					wavg = (strata_df['effect'] * strata_df['r2']).sum() / strata_df['r2'].sum()
-					causal_df.loc[feat,y] = wavg
-					causal_df.loc[feat,'R2'] = strata_df['r2'].mean()
-					causal_df.loc[feat,'NumValidSamples'] = len(strata_df)
-					causal_df.loc[feat,'NumUniqueValues'] = len(set(strata_df['treatment']))
-					causal_df.loc[feat,'NumNegativeSamples'] = (strata_df['treatment'] == 0).sum()
-					causal_df.loc[feat,'NumPositiveSamples'] = (strata_df['treatment'] != 0).sum()
+				# Record average effect in causal_df
+				strata_df.loc[strata_df['r2']<0,'r2'] = np.nan
+				strata_df.loc[strata_df['r2']>1,'r2'] = np.nan
+				strata_df = strata_df.dropna()
+				if len(strata_df)==0 or len(set(strata_df['treatment']))==1:
+					self.print('No valid strata for %s->%s' % (feat,y))
+					causal_df.loc[feat,y] = np.nan
+				elif (strata_df['treatment']!=0).sum() < self.clipping_threshold:
+					self.print('Not enough positive samples for %s' % feat)
+					causal_df.loc[feat,y] = np.nan
 				else:
-					causal_df.loc[feat,y] = strata_df['effect'].mean()
+					if self.weighted_average:
+						wavg = (strata_df['effect'] * strata_df['r2']).sum() / strata_df['r2'].sum()
+						causal_df.loc[feat,y] = wavg
+						causal_df.loc[feat,'R2'] = strata_df['r2'].mean()
+						causal_df.loc[feat,'NumValidSamples'] = len(strata_df)
+						causal_df.loc[feat,'NumUniqueValues'] = len(set(strata_df['treatment']))
+						causal_df.loc[feat,'NumNegativeSamples'] = (strata_df['treatment'] == 0).sum()
+						causal_df.loc[feat,'NumPositiveSamples'] = (strata_df['treatment'] != 0).sum()
+					else:
+						causal_df.loc[feat,y] = strata_df['effect'].mean()
 
 		causal_df = causal_df.dropna()
-		causal_df['abs'] = abs(causal_df[y])
-		causal_df = causal_df.sort_values(by='abs',ascending=False)
-		causal_df = causal_df.drop(columns=['abs'])
+
+		if self.num_classes is None:
+			causal_df['abs'] = abs(causal_df[y])
+			causal_df = causal_df.sort_values(by='abs',ascending=False)
+			causal_df = causal_df.drop(columns=['abs'])
 
 		return causal_df
