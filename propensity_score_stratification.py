@@ -153,6 +153,8 @@ class PropensityScoreStratification(object):
 				strata_df.loc[samples,'r2'] = r2_score(tmpy,model.predict(tmpX))
 
 			# Record average effect in causal_df
+			strata_df.loc[strata_df['r2']<0,'r2'] = np.nan
+			strata_df.loc[strata_df['r2']>1,'r2'] = np.nan
 			strata_df = strata_df.dropna()
 			if len(strata_df)==0 or len(set(strata_df['treatment']))==1:
 				self.print('No valid strata for %s->%s' % (feat,y))
@@ -162,10 +164,6 @@ class PropensityScoreStratification(object):
 				causal_df.loc[feat,y] = np.nan
 			else:
 				if self.weighted_average:
-					# Remove invalid R2
-					strata_df.loc[strata_df['r2']<0,'r2'] = np.nan
-					strata_df.loc[strata_df['r2']>1,'r2'] = np.nan
-					strata_df = strata_df.dropna()
 					wavg = (strata_df['effect'] * strata_df['r2']).sum() / strata_df['r2'].sum()
 					causal_df.loc[feat,y] = wavg
 					causal_df.loc[feat,'R2'] = strata_df['r2'].mean()
