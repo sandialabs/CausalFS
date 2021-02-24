@@ -29,7 +29,7 @@ class PropensityScoreStratification(object):
 				- Must be >= 2
 
 			Propensity score stratification determines causal impact (x->y) by first grouping samples by
-				P(x|common_causes)
+				P(X=x|common_causes)
 			where common_causes is the set of {C s.t C->x and C->y}. The causal impact is determined to be
 				dy/dx ~y = f(x)
 			the average linear regression for each strata. If weighted_average is True, the average for each
