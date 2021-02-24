@@ -157,16 +157,28 @@ class PropensityScoreStratification(object):
 			if len(strata_df)==0 or len(set(strata_df['treatment']))==1:
 				self.print('No valid strata for %s->%s' % (feat,y))
 				causal_df.loc[feat,y] = np.nan
+			elif (strata_df['treatment']!=0).sum() < self.clipping_threshold:
+				self.print('Not enough positive samples for %s' % feat)
+				causal_df.loc[feat,y] = np.nan
 			else:
 				if self.weighted_average:
 					# Remove invalid R2
-					strata_df.loc[strata_df['r2']<0,'r2'] = 0
-					strata_df.loc[strata_df['r2']>1,'r2'] = 0
+					strata_df.loc[strata_df['r2']<0,'r2'] = np.nan
+					strata_df.loc[strata_df['r2']>1,'r2'] = np.nan
+					strata_df = strata_df.dropna()
 					wavg = (strata_df['effect'] * strata_df['r2']).sum() / strata_df['r2'].sum()
 					causal_df.loc[feat,y] = wavg
-					causal_df.loc[feat,'%s_R2' % y] = strata_df['r2'].mean()
-					causal_df.loc[feat,'%s_NumValidSamples' % y] = len(strata_df)
+					causal_df.loc[feat,'R2'] = strata_df['r2'].mean()
+					causal_df.loc[feat,'NumValidSamples'] = len(strata_df)
+					causal_df.loc[feat,'NumUniqueValues'] = len(set(strata_df['treatment']))
+					causal_df.loc[feat,'NumNegativeSamples'] = (strata_df['treatment'] == 0).sum()
+					causal_df.loc[feat,'NumPositiveSamples'] = (strata_df['treatment'] != 0).sum()
 				else:
 					causal_df.loc[feat,y] = strata_df['effect'].mean()
 
-			return causal_df
+		causal_df = causal_df.dropna()
+		causal_df['abs'] = abs(causal_df[y])
+		causal_df = causal_df.sort_values(by='abs',ascending=False)
+		causal_df = causal_df.drop(columns=['abs'])
+
+		return causal_df
