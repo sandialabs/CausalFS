@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore',category=UserWarning)
 warnings.filterwarnings('ignore',category=ConvergenceWarning)
 
 class PropensityScoreStratification(object):
-	def __init__(self,num_classes=None,norm='l2',num_strata=5,
+	def __init__(self,num_classes=None,norm=None,num_strata=5,
 					clipping_threshold=10,weighted_average=True,
 					verbose=False):
 		'''
